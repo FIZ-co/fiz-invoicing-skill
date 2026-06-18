@@ -1,0 +1,13 @@
+# OpenAI Codex skill metadata (Agent Skills standard).
+# Optional companion to SKILL.md; ignored by runtimes that don't read it.
+# Schema: https://developers.openai.com/codex/skills
+interface:
+  display_name: "FIZ Invoicing"
+  short_description: "Portuguese invoices via FIZ API: VAT, items, issue, PDF"
+  default_prompt: "Use $fiz-invoicing to issue an invoice via the FIZ Public API. Read SKILL.md first; set FIZ_API_KEY in the environment (never in chat); take VAT rates and exemption codes from domain.md; preview all write payloads, and confirm separately before the irreversible issue step."
+
+policy:
+  # Auto-invocation is intentionally enabled (matches the Claude Code side): the
+  # description is the discovery surface, and the real safety net is the
+  # preview-all-writes + separate confirmation before the irreversible issue step.
+  allow_implicit_invocation: true

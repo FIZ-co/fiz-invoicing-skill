@@ -1,0 +1,14 @@
+# Secrets — never commit API keys or local env
+.env
+.env.*
+*.key
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# Local Claude Code settings (per-developer; not for the public repo)
+.claude/

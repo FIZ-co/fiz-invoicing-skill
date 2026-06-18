@@ -1,0 +1,15 @@
+name: validate
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install zsh (for zsh -n syntax check)
+        run: sudo apt-get update && sudo apt-get install -y zsh
+      - name: Run skill validation
+        run: make check

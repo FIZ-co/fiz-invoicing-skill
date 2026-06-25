@@ -82,6 +82,8 @@ List supports `?search=`. `PATCH` accepts any subset of the create fields.
 | `type`       | enum     | **yes**  | see Document types below                                  |
 | `customerId` | string   | **yes**  | customer `id`                                             |
 | `items`      | array    | **yes**  | ≥ 1 element of `{ id: string, quantity: number ≥ 1 }`     |
+| `notes`      | string   | no       | free-text note on the invoice                             |
+| `seriesId`   | string   | no       | series `id` from `GET /series`; omit → account default. Malformed id → 400; well-formed but unknown id → 404 (no silent fallback) |
 | `summary`    | object   | no       | global discount, see below                                |
 | `payment`    | object   | no       | only for `INVOICE_RECEIPT` / `SIMPLIFIED_INVOICE`         |
 
@@ -134,6 +136,32 @@ The example above is the typical `DRAFT` case. When you pass a `payment` object
 back with a non-draft `status` and a populated `payment` field. Either way you
 still call the issue endpoint to finalize.
 
+### `PATCH /invoices/:id` — edit a draft
+
+Updates a draft invoice with PATCH semantics: only the fields you send are
+changed; omitted fields keep their current value. Accepts any subset of the create
+fields **except `type`** (the document type cannot be changed on update):
+`notes`, `dueDate`, `cae`, `customerId`, `items`, `summary`, `payment`, `seriesId`.
+Returns the updated invoice. Intended for drafts; an issued invoice should be
+corrected with a credit note rather than edited.
+
+**404 on PATCH has two causes:** an unknown invoice `id` in the path, *or* a
+well-formed but unknown `seriesId` in the body (same as create) — don't assume it's
+always the invoice id.
+
+**`payment` differs from create here:** unlike `POST /invoices`, PATCH does **not**
+enforce the `INVOICE_RECEIPT` / `SIMPLIFIED_INVOICE` restriction on `payment` (the
+type-dependent validator is dropped on update because `type` is omitted). So a
+`payment` object is accepted on a PATCH regardless of document type — avoid sending
+one unless the document type actually supports it.
+
+```bash
+curl -sS -w '\n%{http_code}' -X PATCH \
+  "$FIZ_API_URL/invoices/<id>" \
+  -H "x-api-key: $FIZ_API_KEY" -H 'Content-Type: application/json' \
+  -d '{ "notes": "PO #118", "seriesId": "68483b3fa19e44171e3d0808" }'
+```
+
 ### `POST /invoices/:id/issue` — issue (finalize)
 
 No body. Returns the invoice with the official `number`, `status: ISSUED`, and a
@@ -174,13 +202,53 @@ Deletes the invoice (used for drafts). Returns `{ id, createdAt }`.
 
 ---
 
+## Series
+
+### `GET /series` — list the account's active series
+
+Read-only. No query params. Returns an array of the account's **active** series.
+Use a series `id` as the `seriesId` when creating or PATCHing an invoice to issue it
+into that numbering sequence; omit `seriesId` to use the account's default series.
+
+Each element:
+
+| Field            | Type      | Notes                                                  |
+|------------------|-----------|--------------------------------------------------------|
+| `id`             | string    | the series id — use as `seriesId` on an invoice        |
+| `name`           | string?   | e.g. `"SAAS"`                                           |
+| `isDefault`      | boolean?  | whether this is the account's default series           |
+| `status`         | string?   | e.g. `"ACTIVE"`                                         |
+| `managementMode` | string?   | numbering mode: `AUTOMATIC` \| `MANUAL`                 |
+| `entries`        | array?    | per-document-type entries (with ATCUD), see below       |
+
+**`entries[]` element:**
+
+| Field            | Type      | Notes                                                  |
+|------------------|-----------|--------------------------------------------------------|
+| `documentType`   | string    | document type the entry applies to, e.g. `"INVOICE"`   |
+| `validationCode` | string?   | series ATCUD validation code assigned by the AT, e.g. `"AAJF"` |
+| `isVerified`     | boolean?  | whether the entry is verified/communicated to the AT   |
+
+```bash
+curl -sS -w '\n%{http_code}' \
+  "$FIZ_API_URL/series" \
+  -H "x-api-key: $FIZ_API_KEY"
+```
+
+---
+
 ## Validation rules to remember
 
 - **Strict whitelist**: any unknown property → 400. Send only documented fields.
 - `dueDate` / `payment.date` must be full ISO 8601 **with timezone**
   (`...T00:00:00.000Z`), not a bare `YYYY-MM-DD`.
 - `items` must have at least one entry; each `quantity` ≥ 1.
-- `payment` is restricted to `INVOICE_RECEIPT` / `SIMPLIFIED_INVOICE`.
+- `payment` is restricted to `INVOICE_RECEIPT` / `SIMPLIFIED_INVOICE` **on create
+  only** (`POST /invoices`); on `PATCH /invoices/:id` that type check is not
+  applied, so a `payment` is accepted regardless of document type.
+- `seriesId`, when present, is never silently ignored: a malformed value (not a
+  24-char Mongo id) → **400**, while a well-formed but unknown/wrong-account id →
+  **404** (on both create and PATCH).
 - Enum values are case-sensitive and exactly as written above. Note `payment.method`
   uses camelCase (`mbWay`, `bankTransfer`) while document types and vat rates use
   UPPER_SNAKE_CASE.

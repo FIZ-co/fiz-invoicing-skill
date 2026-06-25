@@ -184,6 +184,13 @@ Default is no withholding unless the user says their services are subject to it.
   2023; its presence means the document is certified and registered.
 - **Sequential numbering**: you cannot issue an invoice dated before the last
   issued invoice in its series. Backdating is restricted by law.
+- **Series** (*série*): every issued document belongs to a numbering series, each
+  with its own sequence and ATCUD. An account has a **default series** and may have
+  several active ones (e.g. one NIF running two brands). On create you may pass an
+  optional `seriesId` to choose a non-default series; omit it to use the default.
+  List the account's active series with `GET /series` — its `id` is the `seriesId`.
+  Series selection has no tax effect on the line items; it only controls which
+  numbered sequence the document is issued into.
 - Marking an invoice **paid** does not notify the AT (internal tracking only).
 - To reverse an issued invoice you issue a **credit note** (`CREDIT_NOTE`) with a
   reason — there is no "delete" for issued documents.

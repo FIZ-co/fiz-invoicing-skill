@@ -11,9 +11,11 @@
 #   fiz GET  /invoices
 #   fiz GET  "/customers?search=Joao"
 #   fiz POST /customers '{"name":"João Silva","country":"PT"}'
-#   fiz POST /invoices  '{"dueDate":"2026-07-18T00:00:00.000Z","cae":"62010","type":"INVOICE","customerId":"...","items":[{"id":"...","quantity":1}]}'
-#   fiz POST /invoices/<id>/issue
-#   fiz GET  /invoices/<id>/pdf
+#   fiz POST  /invoices  '{"dueDate":"2026-07-18T00:00:00.000Z","cae":"62010","type":"INVOICE","customerId":"...","items":[{"id":"...","quantity":1}]}'
+#   fiz GET   /series
+#   fiz PATCH /invoices/<id> '{"notes":"PO #118"}'
+#   fiz POST  /invoices/<id>/issue
+#   fiz GET   /invoices/<id>/pdf
 #
 # Works under bash and zsh. Requires: curl. `jq` pretty-prints responses if present.
 #

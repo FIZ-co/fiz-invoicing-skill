@@ -220,6 +220,28 @@ The response includes the new invoice `id` (needed to issue) and `status`
 (`DRAFT`). The invoice `date` is set to now and `currency` is `EUR` by the API —
 you do not send them.
 
+**Optional — notes** (`notes`): free-text note shown on the invoice, e.g.
+`"notes": "PO #118"`.
+
+**Optional — series** (`seriesId`): issue this invoice into a specific numbering
+series instead of the account default. Omit it and the account's default series is
+used — most accounts only have one, so you rarely need this. When the user does run
+multiple series (e.g. two brands on one NIF), list them with `GET /series` and pass
+the chosen `id`:
+```bash
+fiz GET /series
+```
+Returns the active series, each with `id`, `name`, `isDefault`, `status`,
+`managementMode`, and `entries[]` (per document type, with the ATCUD
+`validationCode`). Pass the `id` as `seriesId` on create:
+```json
+"seriesId": "68483b3fa19e44171e3d0808"
+```
+It must be a valid series id from `GET /series` — there is **no silent fallback to
+the default** if it's wrong. A malformed value (not a 24-char Mongo id) is rejected
+with **400**; a well-formed but unknown/wrong-account id is rejected with **404**
+("that series does not exist"), *not* 400.
+
 **Optional — global discount** (`summary`):
 ```json
 "summary": { "globalDiscountType": "PERCENT", "globalDiscountPercent": 10 }
@@ -233,6 +255,21 @@ Use `"AMOUNT"` with `globalDiscountAmount` for a fixed-value discount instead.
 ```
 `method` is one of: `cash`, `card`, `bankTransfer`, `mbWay`, `multibanco`,
 `spin`, `other`.
+
+### Step 3b — Edit the draft (optional)
+
+A draft can be edited before issuing with `PATCH /invoices/:id`. It uses PATCH
+semantics — send only the fields you want to change; omitted fields keep their
+current value. You can update `notes`, `dueDate`, `cae`, `customerId`, `items`,
+`summary`, `payment`, and `seriesId` (e.g. move the draft into another series):
+```bash
+fiz PATCH /invoices/{id} '{ "notes": "PO #118", "seriesId": "68483b3fa19e44171e3d0808" }'
+```
+Returns the updated draft. A **404** here means *something* referenced wasn't
+found — either the invoice `id` in the path **or** a `seriesId` you passed (a
+well-formed but unknown series 404s the same way it does on create). Check which
+before telling the user the draft is gone. Editing is intended for drafts — once an
+invoice is issued it should be corrected with a credit note, not a PATCH.
 
 ### Step 4 — Issue the invoice
 
@@ -269,7 +306,9 @@ and when to use it.
 | Create customer   | `POST /customers`          |
 | List/search items | `GET /items?search=…`      |
 | Create item       | `POST /items`              |
+| List series       | `GET /series`              |
 | Create draft      | `POST /invoices`           |
+| Edit draft        | `PATCH /invoices/:id`      |
 | Issue             | `POST /invoices/:id/issue` |
 | List invoices     | `GET /invoices`            |
 | Get one invoice   | `GET /invoices/:id`        |

@@ -178,6 +178,38 @@ No body. Returns the invoice with the official `number`, `status: ISSUED`, and a
 
 If `status` is `FAILED`, surface `atMessage` and `isRetriable` to the user.
 
+### `POST /invoices/credit-notes` — reverse an issued invoice
+
+Creates a credit note that reverses `parentInvoiceId` (a full reversal — the
+parent's customer and lines are copied). By default it is **issued immediately**.
+
+**Request:**
+
+| Field             | Type    | Req | Notes                                                        |
+|-------------------|---------|-----|--------------------------------------------------------------|
+| `parentInvoiceId` | string  | yes | The issued invoice to reverse.                               |
+| `reasonCode`      | enum    | yes | Anexo 40 credit-note reason (see `domain.md`), e.g. `INCORRECT_VAT_RATE`. |
+| `reason`          | string  | no  | Free-text reason. Required by the AT; if omitted a default label for `reasonCode` is used. |
+| `issue`           | boolean | no  | Default `true` → created **and issued**. `false` → left as a draft. |
+
+**Response:** the credit note — `documentType: CREDIT_NOTE`, its own `id`,
+`number`, `atcud`, `status` (`ISSUED` unless `issue:false`), `creditNoteReasonCode`,
+`parentInvoiceId`, `customer`, `items`, `summary`, and a `syncWithAt` block (check
+it like any issue). A full credit note also sets the **parent** to
+`status: CANCELED`.
+
+Common errors: **404** if `parentInvoiceId` doesn't exist; **400** for an invalid
+`reasonCode`.
+
+### `POST /invoices/:id/cancel` — cancel an issued invoice
+
+No body. Sets the invoice to `status: CANCELED` (and syncs the cancellation with
+the AT). Returns the cancelled invoice with `canceledAt` and a `syncWithAt` block.
+
+**400** if the invoice already has issued credit/debit notes against it — cancel
+is only for a document nothing else references yet; otherwise reverse it with a
+credit note.
+
 ### `GET /invoices` — list
 
 Query params: `offset` (default 0), `limit` (default 20), `sort`

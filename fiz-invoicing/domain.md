@@ -201,6 +201,37 @@ Default is no withholding unless the user says their services are subject to it.
 
 ---
 
+## Credit note reasons (`reasonCode` — Anexo 40)
+
+A credit note reverses an issued invoice and, like an exemption reason, must state
+*why* under Art. 78.º do CIVA. The `reasonCode` is an enum; the AT wants the
+regularization justified. Pick the code that matches the real reason — the same
+"don't guess" discipline as the VAT exemption codes above. Alongside the code, a
+short free-text `reason` is **required** (the note is rejected without one).
+
+Most-used codes (there are ~26 in total; these cover the vast majority):
+
+| `reasonCode`             | Portuguese                          | When                                                          |
+|--------------------------|-------------------------------------|--------------------------------------------------------------|
+| `INCORRECT_VAT_RATE`     | Correção de IVA — taxa incorreta    | The invoice was issued with the wrong VAT rate/exemption.     |
+| `WRONG_INVOICE`          | Fatura emitida por engano/indevida  | The invoice was issued by mistake / should not exist.         |
+| `INVOICE_EMISSION_ERROR` | Erro na emissão da fatura           | An error in how the invoice was issued (wrong data).          |
+| `OPERATION_CANCELLATION` | Anulação da operação                | The underlying sale/operation was cancelled.                  |
+| `RETURN_GOODS_SERVICES`  | Devolução de bens ou de serviços    | Goods or services returned by the customer.                   |
+| `DISCOUNT_BONUS`         | Rabate/Bónus/Desconto               | A discount/rebate granted after invoicing.                    |
+
+Other codes exist for bad debts (`BAD_DEBT_UNDER_750`, insolvency…), VAT-regime
+changes (`VAT_REGIME_CHANGE`), pro-rata / deduction-right adjustments, and
+corporate reorganizations — use them only when they genuinely apply. The full
+list is in the AT's Anexo 40 (Art. 78.º CIVA); `reference.md` documents the
+credit-note endpoint and its fields.
+
+**"How do I fix an invoice I already issued?"** → issue a credit note (reverses
+it), then issue a **new correct invoice**. You cannot edit or delete an issued
+document. See SKILL.md, "Correcting or cancelling an issued invoice".
+
+---
+
 ## Payment methods (`payment.method`)
 
 `cash` · `card` · `bankTransfer` · `mbWay` · `multibanco` · `spin` · `other`

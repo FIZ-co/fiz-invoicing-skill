@@ -85,6 +85,10 @@ These endpoints change state on the user's account. Two levels of care:
   tax authority. **Always get an explicit, separate confirmation** (beyond the plan
   approval above), showing the draft's customer, line items, VAT, and total. Do not
   issue on your own initiative.
+- **Before `POST /invoices/credit-notes` and `POST /invoices/:id/cancel`** — these
+  also issue a fiscal change to the AT and are not casually undone. Confirm
+  separately too: for a credit note show which invoice, the reason, and the amount
+  being reversed; for a cancel show which invoice is being voided.
 
 **Invocation policy (deliberate):** this skill keeps model auto-invocation
 *enabled* — the `description` is the discovery surface, and the real safety net is
@@ -290,6 +294,70 @@ fiz GET /invoices/{id}/pdf
 Returns `{ id, name, url }`; the `url` is a downloadable link to the PDF.
 Add `?format=A4` or `?format=RECEIPT` to choose the layout.
 
+## Correcting or cancelling an issued invoice
+
+An **issued** invoice is a final fiscal document: it cannot be deleted or
+`PATCH`ed. There are two ways to undo it, both reported to the AT.
+
+### Credit note — reverse an issued invoice
+
+A credit note (nota de crédito) reverses a previously issued invoice. Use it to
+fix a wrong amount, a wrong VAT rate, a document issued by mistake, a return, etc.
+It is itself a legal document, so it needs a **reason code** (Anexo 40) and a
+short **reason text**.
+
+```bash
+fiz POST /invoices/credit-notes '{
+  "parentInvoiceId": "<the issued invoice id>",
+  "reasonCode": "INCORRECT_VAT_RATE",
+  "reason": "Correção de IVA — taxa incorreta"
+}'
+```
+
+- `parentInvoiceId` — the invoice being reversed. The note copies that invoice's
+  customer and lines, so it reverses the **whole** document (a full reversal).
+- `reasonCode` — an Anexo 40 code (see `domain.md`), e.g. `INCORRECT_VAT_RATE`,
+  `WRONG_INVOICE`, `RETURN_GOODS_SERVICES`, `OPERATION_CANCELLATION`. Pick the one
+  that matches *why*, don't default blindly.
+- `reason` — a human-readable text. **Required** — the note is rejected without a
+  non-empty reason. If you omit it, a default label for the `reasonCode` is used.
+- `issue` — optional, defaults to `true`: the note is created **and issued** in one
+  call (it does not stay a draft). Pass `"issue": false` to leave a draft.
+
+The response is the issued credit note (`documentType: CREDIT_NOTE`,
+`status: ISSUED`, its own `number`/`atcud`, a `syncWithAt` block — check it like
+any issue). A **full** credit note also flips the parent invoice to
+`status: CANCELED`.
+
+Because a credit note issues immediately and hits the AT, treat it like an
+**issue**: confirm with the user first (which invoice, reason, amount).
+
+### To fix a wrong invoice and re-bill
+
+The common "I issued it with the wrong VAT / wrong price" fix is two steps:
+
+1. **Credit note** the wrong invoice (above) — reverses it.
+2. **Issue a new, correct invoice** — the normal create + issue flow, with the
+   right item/VAT this time.
+
+> After re-billing, **verify the VAT on the *new* document** (`GET` it back and
+> check `items[].data.vatRate`/`taxRate`), rather than assuming it inherited what
+> you expected. If you re-bill by reusing a catalog item, confirm that item still
+> carries the VAT you intend — issuing corrections can leave a catalog item in a
+> different state than you last saw it.
+
+### Cancel — for a document with no credit/debit notes yet
+
+```bash
+fiz POST /invoices/{id}/cancel
+```
+
+Cancels an issued invoice directly (sets `status: CANCELED`). This is **only**
+allowed while the invoice has no issued credit/debit notes against it — if it
+does, the API returns **400** and you must work through those notes instead.
+Prefer a credit note when you need an auditable reversal reason; use cancel for a
+clean, reason-less voiding of a document nothing else references yet.
+
 ## Document types (`type`)
 
 Values: `INVOICE` · `INVOICE_RECEIPT` · `SIMPLIFIED_INVOICE` · `RECEIPT` ·
@@ -310,6 +378,8 @@ and when to use it.
 | Create draft      | `POST /invoices`           |
 | Edit draft        | `PATCH /invoices/:id`      |
 | Issue             | `POST /invoices/:id/issue` |
+| Credit note (reverse an issued invoice) | `POST /invoices/credit-notes` |
+| Cancel an issued invoice | `POST /invoices/:id/cancel` |
 | List invoices     | `GET /invoices`            |
 | Get one invoice   | `GET /invoices/:id`        |
 | Download PDF      | `GET /invoices/:id/pdf`    |

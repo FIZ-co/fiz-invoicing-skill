@@ -1,8 +1,10 @@
 # FIZ Public API — Full Reference
 
-Complete field reference for the endpoints used to issue invoices. Base URL:
-`https://api.fiz.co`. Auth header: `x-api-key`. All requests except the docs
-require it.
+Complete field reference for the endpoints used to issue Portuguese fiscal
+documents. Base URL: `https://api.fiz.co`. Auth header: `x-api-key`. All requests
+except the docs require it — **no key → 401, a rejected key → 403.**
+
+The live Swagger UI at `https://api.fiz.co/` is the authoritative contract.
 
 The API validates with a strict whitelist: **unknown fields cause a 400**. Send
 only the fields listed here.
@@ -56,6 +58,10 @@ List supports `?search=`. `PATCH` accepts any subset of the create fields.
 | `vatTerritory`            | enum    | no       | e.g. `CONTINENTAL` (Portuguese territory)               |
 | `taxRate`                 | number  | no       | percentage, ≥ 0, e.g. `23`                              |
 | `vatExemptionReason`      | string  | no       | required when `vatRate` is `EXEMPT`; an `M`-code matching the legal reason — see `domain.md` |
+| `ossCountry`              | string  | no       | OSS country code; mutually exclusive with `vatTerritory`  |
+| `unitDiscountType`        | enum    | no       | `PERCENT` \| `AMOUNT` — a standing discount applied whenever the item is invoiced |
+| `unitDiscountPercent`     | number  | no       | 0–100; requires `unitDiscountType: PERCENT`             |
+| `unitDiscountAmount`      | number  | no       | ≥ 0, per unit; requires `unitDiscountType: AMOUNT`       |
 | `termsOfPayment`          | string  | no       | `"Pagamento a 30 dias"`                                 |
 | `isAutoVATEnabled`        | boolean | no       | default `false`                                         |
 | `withholdingTaxAvailable` | boolean | no       | default `false`                                         |
@@ -67,7 +73,20 @@ Response: the created item, including `id` (use in the invoice `items` array).
 
 ### `GET /items`, `GET /items/:id`, `PATCH /items/:id`, `DELETE /items/:id`
 
-List supports `?search=`. `PATCH` accepts any subset of the create fields.
+List supports `?search=`. **`PATCH /items/:id` requires `type`** even when you
+aren't changing it — send the item's current value alongside whatever you are
+updating. To clear a standing discount:
+
+```json
+{ "type": "SERVICE", "unitDiscountType": null }
+```
+
+`taxRate` is derived from the item's VAT fields when you don't send it — set
+`vatRate` (and `vatTerritory` where relevant) and let the API compute the
+percentage, rather than sending a `taxRate` that contradicts them.
+
+A per-line discount on an invoice **overrides** the item's `unitDiscount*` for
+that line.
 
 ---
 
@@ -75,19 +94,37 @@ List supports `?search=`. `PATCH` accepts any subset of the create fields.
 
 ### `POST /invoices` — create draft
 
-| Field        | Type     | Required | Notes                                                     |
-|--------------|----------|----------|-----------------------------------------------------------|
-| `dueDate`    | string   | **yes**  | ISO 8601 w/ timezone, e.g. `2026-07-18T00:00:00.000Z`     |
-| `cae`        | string   | **yes**  | Portuguese economic activity code, e.g. `"62010"`         |
-| `type`       | enum     | **yes**  | see Document types below                                  |
-| `customerId` | string   | **yes**  | customer `id`                                             |
-| `items`      | array    | **yes**  | ≥ 1 element of `{ id: string, quantity: number ≥ 1 }`     |
-| `notes`      | string   | no       | free-text note on the invoice                             |
-| `seriesId`   | string   | no       | series `id` from `GET /series`; omit → account default. Malformed id → 400; well-formed but unknown id → 404 (no silent fallback) |
-| `summary`    | object   | no       | global discount, see below                                |
-| `payment`    | object   | no       | only for `INVOICE_RECEIPT` / `SIMPLIFIED_INVOICE`         |
+| Field          | Type     | Required | Notes                                                     |
+|----------------|----------|----------|-----------------------------------------------------------|
+| `cae`          | string   | **yes**  | Portuguese economic activity code, e.g. `"62010"`         |
+| `type`         | enum     | **yes**  | see Document types below                                  |
+| `customerId`   | string   | **yes**  | customer `id`                                             |
+| `items`        | array    | **yes**  | at least 1 element (upper bound 200), see the item-line table below |
+| `date`         | string   | no       | issue date, ISO 8601 w/ timezone; omit → now. Determines the tax period. An explicit `null` is rejected — omit the key |
+| `dueDate`      | string   | no       | ISO 8601 w/ timezone; omit → the issue date               |
+| `taxPointDate` | string   | no       | *data da operação* (art. 36.º n.º 5 al. f) CIVA); omit → the issue date. Must not be after the issue date. Ignored on credit/debit notes |
+| `notes`        | string   | no       | free-text note on the invoice                             |
+| `seriesId`     | string   | no       | series `id` from `GET /series`; omit → account default. Malformed id → 400; well-formed but unknown id → 404 (no silent fallback) |
+| `summary`      | object   | no       | global discount, see below                                |
+| `payment`      | object   | no       | only for `INVOICE_RECEIPT` / `SIMPLIFIED_INVOICE`         |
 
-The API sets `date` (now) and `currency` (`EUR`) itself — do not send them.
+The API sets `currency` (`EUR`) itself — do not send it.
+
+**`items[]` element:**
+
+| Field             | Type   | Required | Notes                                              |
+|-------------------|--------|----------|----------------------------------------------------|
+| `id`              | string | **yes**  | item `id` from `GET /items`                        |
+| `quantity`        | number | **yes**  | ≥ 1                                                |
+| `discountType`    | enum   | no       | `PERCENT` \| `AMOUNT` — overrides the item's `unitDiscount*`; applied before the global discount |
+| `discountPercent` | number | no       | 0–100 (**100 allowed** = gifted line); requires `discountType: PERCENT` |
+| `discountAmount`  | number | no       | ≥ 0, per unit; requires `discountType: AMOUNT`     |
+
+A `discountType` without its matching value, or a value without the matching
+type, is a **400**.
+
+Response fields `number`, `atcud` and `shortHash` are `null` on a draft — they
+are assigned at issue.
 
 **`summary` object:**
 
@@ -141,9 +178,17 @@ still call the issue endpoint to finalize.
 Updates a draft invoice with PATCH semantics: only the fields you send are
 changed; omitted fields keep their current value. Accepts any subset of the create
 fields **except `type`** (the document type cannot be changed on update):
-`notes`, `dueDate`, `cae`, `customerId`, `items`, `summary`, `payment`, `seriesId`.
-Returns the updated invoice. Intended for drafts; an issued invoice should be
-corrected with a credit note rather than edited.
+`notes`, `date`, `dueDate`, `taxPointDate`, `cae`, `customerId`, `items` (with
+their per-line discounts), `summary`, `payment`, `seriesId`. Returns the updated
+invoice, including its `number`/`atcud`/`shortHash`. Intended for drafts; an
+issued invoice should be corrected with a credit note rather than edited — the
+one write allowed on an issued document is `POST /invoices/:id/pay`.
+
+`items` is replaced wholesale, not merged: send every line you want to keep.
+
+**`taxPointDate` can be cleared** with an explicit `"taxPointDate": null`, after
+which the document falls back to its issue date. `date` cannot — a `null` there is
+rejected; omit the key to leave the issue date unchanged.
 
 **404 on PATCH has two causes:** an unknown invoice `id` in the path, *or* a
 well-formed but unknown `seriesId` in the body (same as create) — don't assume it's
@@ -164,8 +209,9 @@ curl -sS -w '\n%{http_code}' -X PATCH \
 
 ### `POST /invoices/:id/issue` — issue (finalize)
 
-No body. Returns the invoice with the official `number`, `status: ISSUED`, and a
-`syncWithAt` block:
+No body. Returns **200** (not 201 — it finalizes an existing draft) with the
+official `number`, the `atcud`, the 4-character `shortHash` printed on the PDF,
+`status: ISSUED`, and a `syncWithAt` block:
 
 | Field         | Type    | Notes                                            |
 |---------------|---------|--------------------------------------------------|
@@ -210,13 +256,51 @@ the AT). Returns the cancelled invoice with `canceledAt` and a `syncWithAt` bloc
 is only for a document nothing else references yet; otherwise reverse it with a
 credit note.
 
+### `POST /invoices/:id/pay` — register a payment on an issued invoice
+
+Settles an invoice that is **already issued** — the one write allowed on an issued
+document. Only for `documentType` `INVOICE` or `DEBIT_NOTE` in status `ISSUED`.
+
+| Field    | Type   | Req | Notes                                                        |
+|----------|--------|-----|--------------------------------------------------------------|
+| `method` | enum   | yes | `cash` \| `card` \| `bankTransfer` \| `mbWay` \| `multibanco` \| `spin` \| `other` |
+| `date`   | string | yes | ISO 8601 w/ timezone                                          |
+| `amount` | number | no  | **Omit to settle the full outstanding balance.** Partial payment: ≥ 0.01, max 2 decimals. An explicit `null` is rejected — omit the key |
+
+**Response:**
+
+| Field       | Type    | Notes                                                       |
+|-------------|---------|-------------------------------------------------------------|
+| `status`    | enum    | `PAID` once fully settled                                    |
+| `payments`  | array   | every payment recorded, each `{ method, date, amount }`      |
+| `payment`   | object? | **legacy** — populated only when the invoice becomes fully paid (`{ method, date }`, no amount). `null` on a partial payment; use `payments` |
+| `receipt`   | object? | the recibo (RG) **this** payment issued: `{ id, number, atcud, documentType, status, date, series }`. Pass `receipt.id` to `GET /invoices/{id}/pdf`. `null` for invoices imported from the AT (no receipt is issued). Never an earlier receipt |
+| `syncWithAt`| object  | as on issue                                                  |
+
+A receipt carries no `syncWithAt` of its own, so there is no receipt-level sync
+status to check — read the `syncWithAt` on the payment response (the invoice's)
+instead. Don't read the missing block as meaning a payment has no fiscal
+significance.
+
+**400** for a document of the wrong type or status, or an `amount` below 0.01 /
+with more than 2 decimals. **404** for an unknown invoice id.
+
 ### `GET /invoices` — list
 
 Query params: `offset` (default 0), `limit` (default 20), `sort`
 (e.g. `date:desc`), `search`, `documentType`, `status`
 (`DRAFT`/`ISSUED`/`PAID`/`CANCELED`/`CREATED`/`SCHEDULED`), `aggregatedStatus`,
 `date`, `dueDate`, `fromDate`, `toDate`, `currency`, `description`, `notes`,
-`filterAllStatusesByDate`, `includeATInvoices`.
+`parentInvoiceId`, `filterAllStatusesByDate`, `includeATInvoices`.
+
+`parentInvoiceId` is the reliable way to find the documents derived from one
+invoice — the receipts a payment issued, or its credit notes — since a list entry
+carries `parentInvoiceId` but no series, so matching on date alone can pick up
+another invoice's document:
+
+```bash
+fiz GET "/invoices?documentType=RECEIPT&parentInvoiceId=6900afc7e9a04d2adc897c68"
+```
 
 ### `GET /invoices/:id` — get one
 
@@ -269,12 +353,192 @@ curl -sS -w '\n%{http_code}' \
 
 ---
 
+## Templates
+
+### `GET /templates` — list document templates
+
+Read-only, no query params. Each element:
+
+| Field  | Type      | Notes                                                    |
+|--------|-----------|----------------------------------------------------------|
+| `id`   | string    | template id — usable as `templateId` on the PDF endpoint |
+| `name` | string    | e.g. `"Modelo Padrão"`                                    |
+| `cae`  | string[]? | the CAE codes registered on the account                  |
+
+The `cae` array is the practical way to find a **valid CAE for the account**
+instead of guessing one for `POST /invoices`.
+
+---
+
+## VAT (read-only calculators)
+
+Both endpoints are POSTs that **create nothing** — they only compute. Safe to
+call before proposing any write.
+
+### `POST /vat/calculate` — the correct VAT for a sale
+
+| Field              | Type    | Req | Notes                                                     |
+|--------------------|---------|-----|-----------------------------------------------------------|
+| `clientHasVat`     | boolean | yes | `true` = B2B, `false` = final consumer (B2C)              |
+| `itemType`         | enum    | yes | `PRODUCT` \| `SERVICE`                                    |
+| `clientCountry`    | string  | no  | ISO 3166-1 alpha-2; default `PT`                          |
+| `clientTerritory`  | enum    | no  | `continental` \| `azores` \| `madeira` (Portugal only)    |
+| `clientVatNumber`  | string  | no  | national format for PT (a `PT` prefix is stripped); other EU countries validated via VIES |
+| `clientPostalCode` | string  | no  | lets the API resolve a PT client's territory itself       |
+| `clientIsTIENI`    | boolean | no  | client is a *trabalhador independente* / ENI — used to resolve the territory of PT B2B clients with a personal NIF |
+| `invoiceCae`       | string  | no  | the invoice's CAE                                         |
+
+**Response:**
+
+```json
+{
+  "vat":     { "rate": 0, "reason": 40, "text": "…" },
+  "client":  { "country": "ES", "territory": null, "vies": 1 },
+  "warning": null, "warningCode": null
+}
+```
+
+| Field         | Notes                                                                    |
+|---------------|--------------------------------------------------------------------------|
+| `vat.rate`    | Percentage. **Always the normal rate of the applicable regime, or 0 when exempt** — reduced/intermediate bands are never returned; choosing those by item category is the caller's job |
+| `vat.reason`  | Exemption reason as a **number** (e.g. `40`), `null` when VAT applies. The item field `vatExemptionReason` takes the `M`-code **string** (`"M40"`) — map it, checking `domain.md` |
+| `vat.text`    | Explanation of the rate/exemption applied                                 |
+| `client.territory` | Territory used, possibly resolved from the postal code               |
+| `client.vies` | `0`/`1`. For EU countries other than PT this reflects a VIES validation; for PT and non-EU it only reflects the presence of a number. Falls back to the `clientHasVat` you sent if VIES is unavailable |
+
+Handles OSS, reverse charge, intra-EU exemption and the Portuguese territories.
+**402** when the account's plan doesn't include Auto IVA.
+
+### `POST /vat/validate-client` — check a customer's VAT number
+
+Request: `clientHasVat` (required), `clientCountry`, `clientVatNumber`.
+Response: `{ "valid": boolean }`.
+
+**Read the semantics before trusting it:** for EU countries other than PT it is a
+real VIES lookup (cached 24h); **for PT and non-EU clients it only checks that a
+number is present** — any non-empty value returns `true`. If VIES is unavailable
+it returns the `clientHasVat` you sent.
+
+---
+
+## Transport documents (guias de transporte)
+
+Same draft → issue lifecycle as invoices, under `/transport-documents`, and
+equally irreversible once issued.
+
+### `POST /transport-documents` — create draft
+
+| Field               | Type   | Req | Notes                                                      |
+|---------------------|--------|-----|------------------------------------------------------------|
+| `movementType`      | enum   | yes | `GUIA_DE_REMESSA` \| `GUIA_DE_DEVOLUCAO` \| `GUIA_DE_TRANSPORTE` \| `GUIA_DE_ATIVOS_PROPRIOS` \| `GUIA_DE_CONSIGNACAO` |
+| `movementDate`      | string | yes | ISO 8601 w/ timezone. **Must not be in the past** (today or later, `Europe/Lisbon`) — a guia must reach the AT before the goods move |
+| `movementStartTime` | string | yes | loading time, ISO 8601 w/ timezone                          |
+| `movementEndTime`   | string | no  | expected unloading; must be **after** `movementStartTime`   |
+| `addressFrom`       | object | yes | loading place — see the address shape below                 |
+| `addressTo`         | object | no  | unloading place, same shape                                 |
+| `customer`          | object | yes* | recipient. **Required for every type except `GUIA_DE_ATIVOS_PROPRIOS`** — conditional, so it is not listed among the schema's unconditional required fields |
+| `vehicleID`         | string | no  | e.g. `"AA-00-BB"`                                            |
+| `items`             | array  | yes | elements of `{ id, quantity }`, same as an invoice           |
+
+**Address shape** (`addressFrom` / `addressTo`):
+
+| Field           | Type   | Req | Example                     |
+|-----------------|--------|-----|-----------------------------|
+| `name`          | string | yes | `"Armazém Lisboa"`          |
+| `addressDetail` | string | yes | `"Rua da Prata, 12, 2.º"`   |
+| `postalCode`    | string | yes | `"1100-052"`                |
+| `city`          | string | yes | `"Lisboa"`                  |
+| `country`       | string | yes | ISO 3166-1 alpha-2, `"PT"`  |
+| `ref`           | string | no  | id of a saved location      |
+
+**`customer` shape:** `{ "data": { … }, "ref": "<customer id>" }`. `data` is
+required and holds the recipient snapshot — `name` (required), plus optional
+`taxpayerNumber`, `address`, `postalCode`, `city`, `country`. **Only Portuguese
+recipients (`country: "PT"`) are accepted.** `ref` optionally links the guia to an
+existing customer from `GET /customers`; the snapshot is still required.
+
+### The rest of the lifecycle
+
+| Action        | Method & path                            | Notes                                  |
+|---------------|------------------------------------------|----------------------------------------|
+| Edit draft    | `PATCH /transport-documents/:id`         | 200; subset of the create fields       |
+| Issue         | `POST /transport-documents/:id/issue`    | 200; reports to the AT. **400** if invalid or already issued |
+| Cancel        | `POST /transport-documents/:id/cancel`   | 200. **400** if not issued or already cancelled |
+| List          | `GET /transport-documents`               | `offset`, `limit`, `sort` (e.g. `movementDate:desc`), `search`, `movementType`, `issueStatus` (`DRAFT` \| `ISSUED` \| `CANCELED`) |
+| Get one       | `GET /transport-documents/:id`           |                                        |
+| PDF           | `GET /transport-documents/:id/pdf`       |                                        |
+| Delete        | `DELETE /transport-documents/:id`        | drafts only                            |
+
+---
+
+## Bank (read-only)
+
+### `GET /bank/connections`
+
+No params. Array of `{ id, providerName, countryCode, status, createdAt,
+updatedAt, maskedIbans[] }` (e.g. `"PT··3003"`).
+
+### `GET /bank/transactions`
+
+| Param          | Req | Notes                                             |
+|----------------|-----|---------------------------------------------------|
+| `connectionId` | yes | from `GET /bank/connections`                      |
+| `page`         | no  | default 1                                         |
+| `pageSize`     | no  | default 50                                        |
+| `fromDate`     | no  | ISO 8601 w/ timezone                              |
+| `toDate`       | no  | ISO 8601 w/ timezone                              |
+| `searchString` | no  | free text (description, merchant, …)              |
+| `direction`    | no  | `Income` \| `Expense` — **capitalised**, unlike the UPPER_SNAKE enums elsewhere |
+| `types`        | no  | array of `Purchase` \| `Transfer` \| `MbwayTransfer` \| `Withdrawal` \| `Fee` \| `Other` |
+| `language`     | no  | `pt` \| `en` — language of category names         |
+
+**403** when the account has no accounting access.
+
+---
+
+## Idempotency
+
+Every **write** endpoint (`POST` / `PATCH` / `DELETE` on customers, items,
+invoices and transport documents) accepts an optional `Idempotency-Key` request
+header. Without it, behaviour is unchanged.
+
+| Aspect          | Value                                                              |
+|-----------------|--------------------------------------------------------------------|
+| Header          | `Idempotency-Key: <key>`                                            |
+| Key format      | printable ASCII, no spaces, ≤ 128 chars (a UUID is ideal). Malformed → **400** |
+| Replay          | same status + body as the first call, plus `Idempotent-Replayed: true` |
+| In progress     | **409** with `Retry-After` — the only 409 that is a plain retry, with the *same* key |
+| Outcome unknown / response expired | **409** without `Retry-After` — the write may already have happened. `GET` to check before retrying; reusing the key just 409s again, and a new key risks a duplicate. The `message` says which case it is |
+| Key reused with a different body | **422**                                            |
+| Retention       | 30 days                                                             |
+| After a 5xx     | The key is **spent**, not released — only an early validation 400 frees it. Reusing it answers 409; `GET` to check whether the write landed, then resend with a new key if it did not |
+
+Generate one key per logical operation and reuse it across ordinary retries (a
+timeout, a dropped connection); a new key there defeats the mechanism. The
+exception is a 409 reporting an unknown outcome — verify with a `GET` first.
+
+Carry the key as a **literal value**, not in shell state: generate it once and
+reuse the identical string on every retry of that operation. A command embedding
+`$(uuidgen)` re-evaluates it on the retry and sends a different key, which is
+what produces the duplicate. A key scoped to a single command is otherwise
+desirable — it can't attach to the next, different write and earn a 422.
+
+---
+
 ## Validation rules to remember
 
 - **Strict whitelist**: any unknown property → 400. Send only documented fields.
-- `dueDate` / `payment.date` must be full ISO 8601 **with timezone**
+- **Every date** (`date`, `dueDate`, `taxPointDate`, `payment.date`,
+  `movementDate`, …) must be full ISO 8601 **with timezone**
   (`...T00:00:00.000Z`), not a bare `YYYY-MM-DD`.
-- `items` must have at least one entry; each `quantity` ≥ 1.
+- `items` must have 1–200 entries; each `quantity` ≥ 1.
+- A discount needs both halves: a `discountType` without its matching
+  `discountPercent`/`discountAmount` — or a value without the type — is a 400.
+  `discountPercent` is 0–100 inclusive.
+- `taxPointDate` must not be after the issue date.
+- `null` is not a general "use the default": `taxPointDate` accepts it (clears the
+  field), while `date` and `pay`'s `amount` reject it. To take a default, **omit
+  the key**.
 - `payment` is restricted to `INVOICE_RECEIPT` / `SIMPLIFIED_INVOICE` **on create
   only** (`POST /invoices`); on `PATCH /invoices/:id` that type check is not
   applied, so a `payment` is accepted regardless of document type.

@@ -3,11 +3,12 @@
 # Schema: https://developers.openai.com/codex/skills
 interface:
   display_name: "FIZ Invoicing"
-  short_description: "Portuguese invoices via FIZ API: VAT, items, issue, PDF"
-  default_prompt: "Use $fiz-invoicing to issue an invoice via the FIZ Public API. Read SKILL.md first; set FIZ_API_KEY in the environment (never in chat); take VAT rates and exemption codes from domain.md; preview all write payloads, and confirm separately before the irreversible issue step."
+  short_description: "Portuguese fiscal docs via FIZ API: VAT, invoices, payments"
+  default_prompt: "Use $fiz-invoicing to issue Portuguese fiscal documents via the FIZ Public API. Read SKILL.md first; set FIZ_API_KEY in the environment (never in chat); take VAT rates and exemption codes from domain.md, or ask the API with POST /vat/calculate; preview all write payloads; send an Idempotency-Key on writes you might retry; and confirm separately before every irreversible fiscal act — issuing, payments (which normally issue a receipt), credit notes, cancellations, and guia issue/cancel."
 
 policy:
   # Auto-invocation is intentionally enabled (matches the Claude Code side): the
   # description is the discovery surface, and the real safety net is the
-  # preview-all-writes + separate confirmation before the irreversible issue step.
+  # preview-all-writes + separate confirmation before every irreversible,
+  # tax-authority-reported step.
   allow_implicit_invocation: true

@@ -130,6 +130,31 @@ Default to `INVOICE` unless the user asks for a receipt/simplified document. Onl
 `INVOICE_RECEIPT` and `SIMPLIFIED_INVOICE` accept a `payment` object at creation
 time (the API returns 400 for other types).
 
+A `RECEIPT` is not something you create directly: it is issued for you when you
+record a payment on an issued invoice (`POST /invoices/:id/pay`), and comes back
+in that response as `receipt`. The receipt carries no `syncWithAt` block of its
+own — there is no receipt-level AT sync status to check, unlike an issued
+invoice. That is a statement about the API response, not a claim that settling
+an invoice has no fiscal reporting consequences: treat recording a payment as a
+legally binding act, and confirm it like one.
+
+### Transport documents (guias) — a separate family
+
+Guias de transporte accompany goods in transit and live under their own
+endpoints (`/transport-documents`), not under invoice `type`:
+
+| Type                      | Portuguese            | Use                                            |
+|---------------------------|-----------------------|------------------------------------------------|
+| `GUIA_DE_REMESSA`         | Guia de remessa       | Delivering goods to a customer                 |
+| `GUIA_DE_DEVOLUCAO`       | Guia de devolução     | Goods being returned                           |
+| `GUIA_DE_TRANSPORTE`      | Guia de transporte    | Generic transport of goods                     |
+| `GUIA_DE_ATIVOS_PROPRIOS` | Guia de ativos próprios | Moving your own goods between your own premises — the only type with no recipient |
+| `GUIA_DE_CONSIGNACAO`     | Guia de consignação   | Goods sent on consignment                      |
+
+The legal constraint that shapes the workflow: a guia must be communicated to the
+AT **before** the transport starts, so its `movementDate` cannot be in the past.
+You cannot document a shipment after the fact.
+
 ---
 
 ## CAE — economic activity code
@@ -184,6 +209,32 @@ Default is no withholding unless the user says their services are subject to it.
   2023; its presence means the document is certified and registered.
 - **Sequential numbering**: you cannot issue an invoice dated before the last
   issued invoice in its series. Backdating is restricted by law.
+- **Immutable does not mean untouchable**: `POST /invoices/:id/pay` records a
+  payment on an issued invoice and issues a recibo for it. That is a settlement,
+  not an edit — the document's fiscal content is unchanged.
+
+### Issue date vs. tax point date
+
+Two distinct dates on an invoice, both optional on create:
+
+- **`date` — the issue date.** Determines the **tax period** the document falls
+  into, so choosing it is a fiscal decision, not a formatting one. Omit it and the
+  document is issued now. Set it only when the user explicitly says which date to
+  issue under, and remember the sequential-numbering rule above still binds.
+- **`taxPointDate` — the *data da operação*** (art. 36.º n.º 5 al. f) CIVA): when
+  the goods were made available or the service was performed. Portuguese law
+  requires it on the document when it differs from the issue date — the typical
+  case being work done in one month and invoiced in the next. It cannot be later
+  than the issue date, and credit/debit notes ignore it (they inherit the
+  operation date of the document they correct).
+
+If the operation happened on the day you are issuing, omit `taxPointDate` — it
+falls back to the issue date anyway.
+
+**Careful when the two coincide on a date in the past.** "Both are the same, so
+send neither" is wrong there: omitting `date` too makes the API issue the
+document **today**, moving it into a different tax period. Drop only
+`taxPointDate` and keep the explicit `date`.
 - **Series** (*série*): every issued document belongs to a numbering series, each
   with its own sequence and ATCUD. An account has a **default series** and may have
   several active ones (e.g. one NIF running two brands). On create you may pass an

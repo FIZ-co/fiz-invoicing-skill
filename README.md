@@ -12,6 +12,10 @@ invoices through the [FIZ](https://fiz.co) Public API by just asking in plain
 language — *"bill João 10 consulting hours"*, *"issue a fatura-recibo for this
 customer"*, *"download the PDF for invoice X"*.
 
+> **Prefer not to manage an API key?** FIZ also ships an **MCP connector** at
+> `https://api.fiz.co/mcp` — connect it to Claude or ChatGPT with OAuth and skip
+> the setup below. See [Two ways to use FIZ with AI](#two-ways-to-use-fiz-with-ai).
+
 It follows the [Agent Skills](https://agentskills.io) open standard, so it is not
 locked to one tool: install it in Claude Code today, and it works with any agent
 runtime that supports the standard. It is **Claude-Code-first**, though — the
@@ -31,19 +35,81 @@ well-formed JSON.
 fatura simplificada, API faturação, IVA, motivo de isenção, CAE, NIF, AT /
 e-Fatura, Portuguese invoicing, Claude Code skill, agent skill.
 
+## Two ways to use FIZ with AI
+
+FIZ can be driven by an AI assistant in two different ways. They are not
+competitors — pick the one that fits how you work.
+
+|                        | **MCP connector** | **This skill** |
+|------------------------|-------------------|----------------|
+| What it is             | FIZ's own MCP server, `https://api.fiz.co/mcp` | An [Agent Skill](https://agentskills.io) — instructions + a curl helper |
+| Setup                  | Paste a URL, sign in with OAuth | Copy a folder, export an API key |
+| Credentials            | **No API key.** OAuth, short-lived tokens, revocable per connection | An API key you manage in your environment |
+| Where it works         | Claude (web, desktop, mobile), ChatGPT, Claude Code | Claude Code and other Agent Skills runtimes |
+| Permissions            | You tick the scopes at connect time, per company | Whatever your API key can do |
+| Confirmation on fiscal acts | Built into the server: preview → your confirmation → execute | Built into the skill's instructions |
+| Best for               | Everyday use, non-technical users, phone and web | Scripting, CI, batch work, the full REST surface |
+
+**Most people should start with the connector.** It needs no API key, works
+outside the terminal, and the confirmation step for issuing is enforced by the
+server rather than by instructions.
+
+### Connecting the MCP server
+
+**Claude (web, desktop, mobile)** — Settings → Connectors → *Add custom
+connector*, paste `https://api.fiz.co/mcp`, then enable it in a chat and sign in.
+
+**ChatGPT** — Settings → Apps & Connectors → *Create*, paste
+`https://api.fiz.co/mcp`, choose OAuth.
+
+**Claude Code:**
+```bash
+claude mcp add --transport http fiz https://api.fiz.co/mcp
+# then, in the session: /mcp → fiz → Authenticate
+```
+
+At sign-in you pick **one company** and which permissions to grant — read
+invoices/customers/items, create and edit drafts, issue fiscal documents, read
+bank transactions. Untick anything you don't want. Disconnect any time at
+[app.fiz.co/settings/integrations](https://app.fiz.co/settings/integrations).
+
+Full connector documentation, including the tool list:
+**https://api.fiz.co/docs/mcp**
+
+### Using both
+
+They coexist. If you run this skill in a session where the FIZ connector is also
+connected, the skill tells the agent to prefer the connector's tools — you get the
+OAuth path for the API calls *and* the skill's Portuguese tax guidance (which VAT
+rate, which exemption code, when a credit note is the right fix) on top. That
+guidance is the part the connector doesn't carry.
+
 ## What it can do
 
 - Find or create a **customer**
 - Find or create **items** (products / services) with the right VAT rate
-- Build a **draft** invoice (with optional discount or payment)
+- Work out the **correct VAT** for a sale, including cross-border, OSS and
+  reverse-charge cases
+- Build a **draft** invoice (with per-line or global discounts, a back-dated issue
+  date, or a separate tax point date)
 - **Issue** it (the legally binding step that reports it to the tax authority)
-- Download the invoice **PDF**
+- **Register a payment** on an issued invoice and get the receipt (recibo) it
+  normally issues
+- Issue a **credit note** to reverse a wrong invoice, or **cancel** one
+- Create and issue a **guia de transporte** (transport document)
+- Read **bank transactions** to check whether an invoice was actually paid
+- Download any document's **PDF**
+
+Writes can carry an **`Idempotency-Key`**, so a retry after a timeout replays the
+original response instead of issuing a second document.
 
 ## Requirements
 
 - [Claude Code](https://docs.claude.com/en/docs/claude-code) installed
 - A FIZ account and an API key — get one at
   **https://app.fiz.co/settings/integrations**
+
+(The MCP connector needs neither: just a FIZ account and the server URL.)
 
 ## Install
 
@@ -92,7 +158,18 @@ Just talk to Claude:
 > *I'm exempt under the small-business regime — issue an invoice for €500 of
 > design work.* (Claude knows this maps to VAT `EXEMPT` + exemption code `M10`.)
 
-Claude will confirm before the irreversible **issue** step.
+> *What VAT should I charge a Spanish company with a valid VAT number?* (Answered
+> from the API's own calculator — no invoice is created.)
+
+> *Invoice 4 was paid by bank transfer today — record it and give me the receipt
+> PDF.*
+
+> *I invoiced Padaria Central at the wrong VAT rate. Credit-note it and re-issue
+> correctly.*
+
+Claude will confirm before the irreversible **issue** step — and before every
+other legally binding fiscal act: recording a payment, credit notes,
+cancellations, and issuing a guia. None of them can be undone.
 
 ## What's inside
 
@@ -114,8 +191,9 @@ runtimes that don't use it simply ignore it.
 **Invocation policy:** auto-invocation is intentionally **enabled** on both
 runtimes (Claude Code leaves model invocation on; Codex sets
 `allow_implicit_invocation: true`). The safety net for these state-changing
-operations is the *preview-all-writes + separate confirmation before the
-irreversible issue step* described in `SKILL.md`, not gating discovery. To force
+operations is the *preview-all-writes + a separate confirmation before each
+irreversible fiscal act* — issuing, payments, credit notes, cancellations, and
+guia issue/cancel — described in `SKILL.md`, not gating discovery. To force
 manual-only use, set `disable-model-invocation: true` (Claude Code) /
 `allow_implicit_invocation: false` (Codex).
 
@@ -127,7 +205,17 @@ manual-only use, set `disable-model-invocation: true` (Claude Code) /
   non-trivial, defer to the user's accountant.
 - Issuing an invoice creates a real, legally binding fiscal document reported to
   the Portuguese tax authority (AT). It cannot be deleted — only corrected with a
-  credit note. The skill confirms before issuing.
+  credit note. Credit notes, cancellations and guias de transporte are likewise
+  reported to the AT.
+- Recording a payment is a legally binding act too, and equally irreversible —
+  there is no "unpay". It normally issues a receipt (recibo); for an invoice
+  imported from the AT, none is issued.
+- The skill asks for a separate confirmation before each of these.
+- A **guia de transporte** must reach the AT before the goods move, so it cannot
+  be back-dated — you can't document a shipment after the fact.
+- Some endpoints depend on the account's plan: the VAT calculator needs Auto IVA,
+  and bank access needs the accounting feature. Without them those calls return
+  402 / 403 respectively.
 
 ## License
 

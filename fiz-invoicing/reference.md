@@ -56,7 +56,7 @@ List supports `?search=`. `PATCH` accepts any subset of the create fields.
 | `description`             | string  | no       |                                                         |
 | `unitType`                | enum    | no       | `UNIT` \| `HOUR` \| `DAY` \| `MONTH` \| `WEEK` \| `BOX` \| `PACKAGE` \| `METER` \| `SQUARE_METER` \| `CUBIC_METER` \| `KILOGRAM` \| `LITER` \| `NA` |
 | `vatTerritory`            | enum    | no       | e.g. `CONTINENTAL` (Portuguese territory)               |
-| `taxRate`                 | number  | no       | percentage, ≥ 0, e.g. `23`; on an OSS item it must be one of the country's rates for the band (0 if `EXEMPT`) |
+| `taxRate`                 | number  | no       | percentage, ≥ 0, e.g. `23`; on an OSS item, one of the country's rates for the band (0 if `EXEMPT`) |
 | `vatExemptionReason`      | string  | no       | required when `vatRate` is `EXEMPT`; an `M`-code matching the legal reason — see `domain.md` |
 | `ossCountry`              | string  | no       | OSS buyer country (EU member state other than `PT`); mutually exclusive with `vatTerritory`; the item can only be billed to customers of that country |
 | `unitDiscountType`        | enum    | no       | `PERCENT` \| `AMOUNT` — a standing discount applied whenever the item is invoiced |
@@ -87,10 +87,12 @@ percentage, rather than sending a `taxRate` that contradicts them.
 
 For an OSS item (`ossCountry`, company with OSS enabled in `GET /company`
 `vatSettings.ossEnabled`) the rate comes from that country's table. Send
-`taxRate` only where the country has two rates in the band (REDUCED in AT, FR,
-IE, IT, LU): the 400 lists them. A rate the country does not apply is refused,
-and a country outside OSS too. The rate is stored with the item and does not
-follow a later change in that country.
+`taxRate` only where the country has two rates in the band (REDUCED in AT, CY,
+FR, IE, IT, LU): the 400 lists them. Send one of the country's rates. A rate
+FIZ's OSS table does not list is still accepted, and logged for FIZ to review;
+a country outside OSS and a non-zero rate on an `EXEMPT` item are refused. The
+rate is stored with the item and does not follow a later change in that
+country.
 
 A per-line discount on an invoice **overrides** the item's `unitDiscount*` for
 that line.

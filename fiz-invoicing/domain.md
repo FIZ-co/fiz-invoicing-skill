@@ -188,11 +188,17 @@ You cannot document a shipment after the fact.
 Configured per item, not on the invoice as a whole:
 - `withholdingTaxType`: `IRS` (individuals' income tax), `IRC` (corporate income
   tax), or `IS` (stamp duty — Imposto de Selo).
-- `withholdingTaxPercent`: 1–99%. A very common value is **25%** for self-employed
-  professional services; some services use other rates (e.g. 11.5%, 23%).
+- `withholdingTaxPercent`: 1–99%. For individuals (IRS, CIRS art. 101): **23%**
+  for the art. 151 professions (25% until 2024), **11.5%** for other services,
+  **16.5%** for copyright and intellectual property, 20% for IFICI/NHR holders.
+  For companies (IRC, CIRC art. 94) withholding applies only to royalties,
+  equipment hire, capital and rental income (25%), not to ordinary services.
 - `withholdingTaxReason`: required only when the type is `IS`.
 - Meaning: the *payer* withholds this amount and remits it to the AT, so the
   amount the supplier actually receives is reduced. It does not change the VAT.
+- Only on services, and only when the customer has a Portuguese NIF: never on
+  goods, an OSS line, a customer abroad or the final consumer. FIZ refuses to
+  issue a document with withholding on such a line.
 
 Default is no withholding unless the user says their services are subject to it.
 

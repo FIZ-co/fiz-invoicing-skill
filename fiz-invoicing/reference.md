@@ -88,11 +88,11 @@ percentage, rather than sending a `taxRate` that contradicts them.
 For an OSS item (`ossCountry`, company with OSS enabled in `GET /company`
 `vatSettings.ossEnabled`) the rate comes from that country's table. Send
 `taxRate` only where the country has two rates in the band (REDUCED in AT, CY,
-FR, IE, IT, LU): the 400 lists them. Send one of the country's rates. A rate
-FIZ's OSS table does not list is still accepted, and logged for FIZ to review;
-a country outside OSS and a non-zero rate on an `EXEMPT` item are refused. The
-rate is stored with the item and does not follow a later change in that
-country.
+FR, GR, IE, IT, LU; INTERMEDIATE in MT): the 400 lists them. Send one of the
+country's rates. A rate FIZ's OSS table does not list is refused (400, with the
+valid rates) and logged for FIZ to review; a country outside OSS and a non-zero
+rate on an `EXEMPT` item are refused too. The rate is stored with the item and
+does not follow a later change in that country.
 
 A per-line discount on an invoice **overrides** the item's `unitDiscount*` for
 that line.
